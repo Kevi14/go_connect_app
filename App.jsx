@@ -5,108 +5,154 @@
  * @format
  */
 
-import React from 'react';
+import React,{useState,useEffect} from 'react';
 import {
   SafeAreaView,
-  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  FlatList,
   StatusBar,
   StyleSheet,
   Text,
   useColorScheme,
   View,
 } from 'react-native';
+import io from 'socket.io-client';
+import NotificationPermission from './NotificationPermission';
+import { NativeModules } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
-
-function Section({ children, title }) {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+const { ForegroundService } = NativeModules;
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+  const [isConnected, setIsConnected] = useState(false);
+  const [socket, setSocket] = useState(null);
+  const [connectedDevices, setConnectedDevices] = useState([]);
+  console.log({Clipboard})
+  Clipboard.addListener((props)=> console.log("Clip changed",props))
+  const disconnectFromServer = () => {
+    if (socket) {
+      socket.disconnect();
+      console.log('Disconnected from WebSocket server');
+      setIsConnected(false); // Update the connection status
+    }
   };
 
+  const connectToServer = () => {
+    console.log('clicked');
+    const newSocket = io('http://192.168.0.175:3000', {
+      transports: ['websocket'], // Ensuring the use of WebSockets
+    });
+
+    newSocket.on('connect', () => {
+      ForegroundService.startForegroundService();
+      console.log('Connected to WebSocket server');
+      setIsConnected(true);
+      // Send this device's info (adjust according to your requirements)
+      const deviceInfo = {
+        name: 'React Native Device',
+        // Additional device-specific info can be added here
+      };
+      newSocket.emit('device-info', deviceInfo);
+    });
+
+    newSocket.on('update-connected-devices', (devices) => {
+      setConnectedDevices(devices);
+    });
+
+    newSocket.on('disconnect', () => {
+      console.log('Disconnected from WebSocket server');
+      setIsConnected(false);
+    });
+
+    setSocket(newSocket); // Updating the socket state
+  };
+
+  
+
+  useEffect(() => {
+    const listener = Clipboard.addListener((content) => {
+      if (socket) {
+        socket.emit('update-clipboard', { content });
+      }
+    });
+
+    return () => listener.remove();
+  }, [socket]);
+
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
+    <>
+    <NotificationPermission></NotificationPermission>
+      <StatusBar barStyle="dark-content" />
+      <SafeAreaView style={styles.safeAreaView}>
+        <View style={styles.section}>
+          <Text style={[styles.textXL, styles.appTitleText]}>
+            Welcome App 👋
+          </Text>
+          <Text>Status: {isConnected ? 'Connected' : 'Disconnected'}</Text>
+          <TouchableOpacity style={styles.button} onPress={connectToServer}>
+            <Text style={styles.buttonText}>Connect to Server</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.disconnectButton]}
+            onPress={disconnectFromServer}
+          >
+            <Text style={styles.buttonText}>Disconnect</Text>
+          </TouchableOpacity>
+          <TextInput style={styles.textInput} placeholder="Type here..." />
         </View>
-      </ScrollView>
-    </SafeAreaView>
+        <FlatList
+          data={connectedDevices}
+          keyExtractor={(item, index) => item.name + index}
+          renderItem={({ item }) => (
+            <Text style={styles.textSm}>{item.name}</Text>
+          )}
+          ListHeaderComponent={
+            <Text style={styles.textMd}>Connected Devices:</Text>
+          }
+        />
+      </SafeAreaView>
+    </>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  safeAreaView: {
+    flex: 1,
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  section: {
+    marginVertical: 24,
+    marginHorizontal: 12,
   },
-  sectionDescription: {
+  textInput: {
+    height: 40,
+    borderColor: 'gray',
+    borderWidth: 1,
     marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+    paddingHorizontal: 10,
+    borderRadius: 5,
   },
-  highlight: {
-    fontWeight: '700',
+  textXL: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  textMd: {
+    fontSize: 18,
+    marginTop: 10,
+  },
+  textSm: {
+    fontSize: 16,
+  },
+  button: {
+    backgroundColor: 'blue',
+    padding: 10,
+    borderRadius: 5,
+    marginTop: 10,
+  },
+  buttonText: {
+    color: 'white',
+    textAlign: 'center',
   },
 });
 
